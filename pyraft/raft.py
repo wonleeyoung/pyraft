@@ -16,9 +16,9 @@ class RaftNode(object):
 	def __init__(self, nid, addr, ensemble={}, peer = False, worker = None, overwrite_peer=False):
 		# raft node & peer common
 		self.nid = nid
-		self.term = 0
+		self.term = 100000
 		self.index = 0
-		self.state = 'c'
+		self.state = 'l'
 		self.last_append_entry_ts = 1
 		self.last_delayed_ts = 1
 		self.last_checkpoint = 0
@@ -26,13 +26,18 @@ class RaftNode(object):
 		self.last_applied = 0
 		self.commit_index = 0
 		self.CONF_PING_TIMEOUT = 1
-
+		self.data_recv_sock = None
+		self.data_recv_shutdown = False
 		self.addr = addr
 		self.ip, self.port = addr.split(':', 1)
 		self.port = int(self.port)
+		self.term_exist = False
 
 		self.raft_req = resp.resp_io(None)
 		self.raft_wait = resp.resp_io(None)
+
+		self.entry_buffer = []
+
 
 		if peer == True:
 			return
@@ -231,11 +236,15 @@ class RaftNode(object):
 		self.th_apply = threading.Thread(target=self.apply_loop)
 		self.th_apply.start()
 
+		self.th_data_recv = threading.Thread(target=self.receive_periodic_data)
+		self.th_data_recv.start()
+
 		for offset in sorted(self.worker_map.keys()):
 			worker = self.worker_map[offset]
 			worker.start(self)
 
 		self.on_start()
+
 
 	def shutdown(self):
 		for offset in sorted(self.worker_map.keys()):
@@ -244,11 +253,16 @@ class RaftNode(object):
 
 		self.shutdown_flag = True
 		self.on_shutdown()
+		self.data_recv_shutdown = True
+		if self.data_recv_sock:
+			self.data_recv_sock.close()
 
 	def join(self):
 		self.th_raft.join()
 		self.th_le.join()
-		self.th_apply.join()
+		self.th_apply.join()	
+		self.th_data_recv.join()
+
 
 		for offset in sorted(self.worker_map.keys()):
 			worker = self.worker_map[offset]
@@ -324,6 +338,36 @@ class RaftNode(object):
 				self.add_node(toks[0], toks[1])
 
 			self.log_info('connect to %s ok' % nid)
+
+    # 센서 데이터 받아오는 부분
+	def receive_periodic_data(self):
+		try:
+			self.data_recv_sock = socket.socket()
+			self.data_recv_sock.bind((self.ip, self.port+2))
+			self.data_recv_sock.listen(1)
+			self.log_info('listening for data from sensors')
+			while not self.data_recv_shutdown:
+				conn, addr = self.data_recv_sock.accept()
+				with conn:
+					while not self.data_recv_shutdown:
+						data = conn.recv(1024)
+						if not data:
+							self.log_error('no data received from sensor')
+							break
+						self.entry_buffer.append(data)
+
+						self.log_info('received data from sensor: %s' % data)
+						self.data['sensor_data'] = data
+
+    
+		except socket.error as e:
+			self.log_error('failed to bind data socket: %s' % str(e))
+		finally:
+			if self.data_recv_sock:
+				self.data_recv_sock.close()
+				self.data_recv_sock = None
+
+
 
 
 	def process_raft_accept(self, sock):
@@ -538,39 +582,50 @@ class RaftNode(object):
 	def do_follower(self):
 		self.log_info('do_follower')
 		vote_list = []
-		self.CONF_PING_TIMEOUT = random.randint(3, 5)
-		peers = self.select_peer_req(0.5)
-		for p in peers:
-			msg_list = p.raft_wait.read_all()
-			if msg_list == None or msg_list == []:
-				continue
-			for toks in msg_list:
-				if isinstance(toks, str):
-					toks = toks.split()
+		a = random.random()
+		b = random.randint(3,6)
+		self.CONF_PING_TIMEOUT = a+b
 
-				if toks[0] == 'vote':
-					term = intcast(toks[1].strip())
-					if term == None:
-						self.log_error('invalid vote: %s' % toks)
-						continue
-					#p.raft_wait.write('yes')
-					vote_list.append([p,term,int(toks[2])])
-		
-					#else:
-					#	p.raft_wait.write('no')
-				else:
-					old_term = self.term
-					self.handle_request(p, toks)
-					if self.term > old_term:
-						# split brain & new leader elected. 
-						# clean data to install snapshot in case of async mode
-						self.index = 0
-						return
+
+		peers = self.select_peer_req(2) # delay in pending vote
+
+		if self.term_exist == False:
+			for p in peers:
+				msg_list = p.raft_wait.read_all()
+				if msg_list == None or msg_list == []:
+					continue
+				
+				for toks in msg_list:
+					if isinstance(toks, str):
+						toks = toks.split()
+
+					if toks[0] == 'vote':
+						term = intcast(toks[1].strip())
+						if term == None:
+							self.log_error('invalid vote: %s' % toks)
+							continue
+						#p.raft_wait.write('yes')
+						if term > self.term:
+							self.term_exist = True
+							vote_list.append([p,term,int(toks[2])])
+			
+						#else:
+						#	p.raft_wait.write('no')
+					else:
+						old_term = self.term
+						self.handle_request(p, toks)
+						if self.term > old_term:
+							self.term_exist = False
+							# split brain & new leader elected. 
+							# clean data to install snapshot in case of async mode
+							self.index = 0
+							return
 
 		if self.last_append_entry_ts > 0 and int(time.time()) - self.last_append_entry_ts > self.CONF_PING_TIMEOUT:
 			self.on_candidate()
 			self.state = 'c'
-
+		
+		# 여기서 최소 election timeout 가지는 노드에게 'yes' 전달하고 나머지는 'no'	
 		if len(vote_list) != 0 and self.state == 'f':
 			max_term = max([v[1] for v in vote_list])
 			vote_list = [v for v in vote_list if v[1] == max_term]
@@ -583,7 +638,12 @@ class RaftNode(object):
 					vote_list[i][0].raft_wait.write('no')
 			self.term = max_term
 
+
+
 	def do_candidate(self):
+		print("do_candidate 실행됨")
+		print("term 수: %d" % self.term)
+		self.term_exist = False
 		if len(self.get_peers()) > 0:
 			connected = 0
 			for nid, p in self.get_peers().items():
@@ -596,7 +656,7 @@ class RaftNode(object):
 		self.term += 1
 
 		voting_wait = CONF_VOTING_TIME * 0.1
-		vote_wait_timeout = 0.5
+		vote_wait_timeout = 0.1
 		wait_remaining = 1 - vote_wait_timeout
 		voted = False
 		list_voted = []
@@ -617,15 +677,20 @@ class RaftNode(object):
 					if term == None:
 						self.log_error('invalid vote: %s' % toks)
 						continue
-
-					list_voted.append([p,term,int(toks[2])])
+					if term >= self.term:
+						self.term = term
+						self.on_follower()
+						self.state = 'f'
+						
+					#list_voted.append([p,term,int(toks[2])])
 					
 				else:
 					if self.handle_request(p, toks):
 						return # elected
 			
 
-		# 여기서 최소 election timeout 가지는 노드에게 'yes' 전달하고 나머지는 'no'
+		# 여기서 최소 election timeout 가지는 노드에게 'yes' 전달하고 나머지는 'no' 
+		# follower를 바꿔서 여기는 작동안한다.
 		if len(list_voted) != 0:
 			max_term = max([v[1] for v in list_voted])
 			list_voted = [v for v in list_voted if v[1] == max_term]
@@ -637,8 +702,7 @@ class RaftNode(object):
 					list_voted[i][0].raft_wait.write('no')
 			self.term = max_term
 	
-  
-  
+
 		if voted:
 			for nid, p in self.get_peers().items():
 				msg_list = p.raft_wait.read_all(wait_remaining)
