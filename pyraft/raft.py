@@ -10,6 +10,7 @@ from pyraft.log import LogItem
 from pyraft.worker.worker import MergedWorker
 from pyraft.worker.redis_worker import RedisWorker
 from pyraft.worker.base_worker import BaseWorker
+import random
 
 class RaftNode(object):
 	def __init__(self, nid, addr, ensemble={}, peer = False, worker = None, overwrite_peer=False):
@@ -24,6 +25,7 @@ class RaftNode(object):
 		self.first_append_entry = False
 		self.last_applied = 0
 		self.commit_index = 0
+		self.CONF_PING_TIMEOUT = 1
 
 		self.addr = addr
 		self.ip, self.port = addr.split(':', 1)
@@ -261,7 +263,7 @@ class RaftNode(object):
 	def add_node(self, nid, addr):
 		with self.peer_lock:
 			if nid == self.nid or nid in self.peers:
-				self.log_warn('node %s already exists' % nid)
+				#self.log_warn('node %s already exists' % nid)
 				return False
 
 			if '__TEMP_%s__' % addr in self.peers: # replace temp peer
@@ -269,7 +271,7 @@ class RaftNode(object):
 
 			for pid, peer in self.peers.items():
 				if addr == peer.addr:
-					self.log_warn('address %s already used in node %s' % (addr, pid))
+					#self.log_warn('address %s already used in node %s' % (addr, pid))
 					return False
 
 			self.peers[nid] = RaftNode(nid, addr, peer = True)
@@ -356,7 +358,7 @@ class RaftNode(object):
 					
 			peer = self.peers[nid]
 			if peer.addr != addr:
-				rio.write(Exception('nid already in ensemble'))
+				#rio.write(Exception('nid already in ensemble'))
 				rio.close()
 
 				if self.overwrite_peer: # delete previous nid automatically (usually used in k8s environment. pod restart)
@@ -535,13 +537,13 @@ class RaftNode(object):
 
 	def do_follower(self):
 		#self.log_info('do_follower')
-
-		peers = self.select_peer_req(1.0)
+		vote_list = []
+		self.CONF_PING_TIMEOUT = random.randint(3, 5)
+		peers = self.select_peer_req(0.5)
 		for p in peers:
 			msg_list = p.raft_wait.read_all()
 			if msg_list == None or msg_list == []:
 				continue
-
 			for toks in msg_list:
 				if isinstance(toks, str):
 					toks = toks.split()
@@ -551,11 +553,11 @@ class RaftNode(object):
 					if term == None:
 						self.log_error('invalid vote: %s' % toks)
 						continue
-
-					if term > self.term:
-						p.raft_wait.write('yes')
-					else:
-						p.raft_wait.write('no')
+					#p.raft_wait.write('yes')
+					vote_list.append([p,term,int(toks[2])])
+		
+					#else:
+					#	p.raft_wait.write('no')
 				else:
 					old_term = self.term
 					self.handle_request(p, toks)
@@ -565,9 +567,58 @@ class RaftNode(object):
 						self.index = 0
 						return
 
-		if self.last_append_entry_ts > 0 and int(time.time()) - self.last_append_entry_ts > CONF_PING_TIMEOUT:
+		if self.last_append_entry_ts > 0 and int(time.time()) - self.last_append_entry_ts > self.CONF_PING_TIMEOUT:
 			self.on_candidate()
 			self.state = 'c'
+
+		if len(vote_list) != 0 and self.state == 'f':
+			max_term = max([v[1] for v in vote_list])
+			vote_list = [v for v in vote_list if v[1] == max_term]
+			vote_list.sort(key=lambda x: x[2])
+			for i in range(len(vote_list)):
+				if i == 0:
+					vote_list[i][0].raft_wait.write('yes')
+
+				else:
+					vote_list[i][0].raft_wait.write('no')
+			self.term = max_term
+
+	# def do_follower(self):
+	# 	#self.log_info('do_follower')
+	# 	vote_list = []
+	# 	self.CONF_PING_TIMEOUT = random.randint(3, 5)
+	# 	peers = self.select_peer_req(0.5)
+	# 	for p in peers:
+	# 		msg_list = p.raft_wait.read_all()
+	# 		if msg_list == None or msg_list == []:
+	# 			continue
+	# 		for toks in msg_list:
+	# 			if isinstance(toks, str):
+	# 				toks = toks.split()
+
+	# 			if toks[0] == 'vote':
+	# 				term = intcast(toks[1].strip())
+	# 				if term == None:
+	# 					self.log_error('invalid vote: %s' % toks)
+	# 					continue
+
+	# 				if term > self.term:
+	# 					p.raft_wait.write('yes')
+	# 					vote_list.append(p)
+	# 				else:
+	# 					p.raft_wait.write('no')
+	# 			else:
+	# 				old_term = self.term
+	# 				self.handle_request(p, toks)
+	# 				if self.term > old_term:
+	# 					# split brain & new leader elected. 
+	# 					# clean data to install snapshot in case of async mode
+	# 					self.index = 0
+	# 					return
+
+	# 	if self.last_append_entry_ts > 0 and int(time.time()) - self.last_append_entry_ts > self.CONF_PING_TIMEOUT:
+	# 		self.on_candidate()
+	# 		self.state = 'c'
 
 
 	def do_candidate(self):
@@ -583,12 +634,13 @@ class RaftNode(object):
 		self.term += 1
 
 		voting_wait = CONF_VOTING_TIME * 0.1
-		vote_wait_timeout = random.randint(0, CONF_VOTING_TIME*1000  * 0.5) / 1000.0
+		vote_wait_timeout = 0.5
 		wait_remaining = 1 - vote_wait_timeout
 		voted = False
-
+		list_voted = []
 		# process vote
 		peers = self.select_peer_req(vote_wait_timeout)
+		print("peers 개수", len(peers))
 		for p in peers:
 			msg_list = p.raft_wait.read_all()
 			if msg_list == None or msg_list == []:
@@ -604,19 +656,58 @@ class RaftNode(object):
 						self.log_error('invalid vote: %s' % toks)
 						continue
 
-					if not voted and term >= self.term:
-						p.raft_wait.write('yes')
-						voted = True
-						self.term = term
-					else:
-						if term >= self.term:
-							self.term = term
-							
-						p.raft_wait.write('no')
+					list_voted.append([p,term,int(toks[2])])
+					
 				else:
 					if self.handle_request(p, toks):
 						return # elected
+			
 
+		# 여기서 최소 election timeout 가지는 노드에게 'yes' 전달하고 나머지는 'no'
+		if len(list_voted) != 0:
+			max_term = max([v[1] for v in list_voted])
+			list_voted = [v for v in list_voted if v[1] == max_term]
+			list_voted.sort(key=lambda x: x[2])
+			for i in range(len(list_voted)):
+				if i == 0:
+					list_voted[i][0].raft_wait.write('yes')
+				else:
+					list_voted[i][0].raft_wait.write('no')
+			self.term = max_term
+	
+		# for p in peers:
+		# 	msg_list = p.raft_wait.read_all()
+		# 	if msg_list == None or msg_list == []:
+		# 		continue
+
+		# 	for toks in msg_list:
+		# 		if isinstance(toks, str):
+		# 			toks = toks.split()
+
+		# 		if toks[0] == 'vote':
+		# 			term = intcast(toks[1].strip())
+		# 			if term == None:
+		# 				self.log_error('invalid vote: %s' % toks)
+		# 				continue
+
+		# 			if not voted and term >= self.term:
+		# 				#p.raft_wait.write('yes')
+		# 				#voted = True
+		# 				list_voted.append([p,term,int(toks[2])])
+		# 				self.term = term
+		# 			else:
+		# 				if term >= self.term:
+		# 					self.term = term
+							
+		# 				p.raft_wait.write('no')
+		# 		else:
+		# 			if self.handle_request(p, toks):
+		# 				return # elected
+
+
+
+  
+  
 		if voted:
 			for nid, p in self.get_peers().items():
 				msg_list = p.raft_wait.read_all(wait_remaining)
@@ -637,7 +728,8 @@ class RaftNode(object):
 		count = 1
 		voters = [self.nid]
 		for nid, p in self.get_peers().items():
-			p.raft_req.write('vote %d' % self.term)
+	#p.raft_req.write('vote %d %s' % (self.term, 'your_additional_data_here'))
+			p.raft_req.write('vote %d %d' % (self.term, self.CONF_PING_TIMEOUT))
 		
 		for i in range(2):
 			get_result = {}
