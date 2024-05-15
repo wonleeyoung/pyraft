@@ -536,7 +536,7 @@ class RaftNode(object):
 
 
 	def do_follower(self):
-		#self.log_info('do_follower')
+		self.log_info('do_follower')
 		vote_list = []
 		self.CONF_PING_TIMEOUT = random.randint(3, 5)
 		peers = self.select_peer_req(0.5)
@@ -582,44 +582,6 @@ class RaftNode(object):
 				else:
 					vote_list[i][0].raft_wait.write('no')
 			self.term = max_term
-
-	# def do_follower(self):
-	# 	#self.log_info('do_follower')
-	# 	vote_list = []
-	# 	self.CONF_PING_TIMEOUT = random.randint(3, 5)
-	# 	peers = self.select_peer_req(0.5)
-	# 	for p in peers:
-	# 		msg_list = p.raft_wait.read_all()
-	# 		if msg_list == None or msg_list == []:
-	# 			continue
-	# 		for toks in msg_list:
-	# 			if isinstance(toks, str):
-	# 				toks = toks.split()
-
-	# 			if toks[0] == 'vote':
-	# 				term = intcast(toks[1].strip())
-	# 				if term == None:
-	# 					self.log_error('invalid vote: %s' % toks)
-	# 					continue
-
-	# 				if term > self.term:
-	# 					p.raft_wait.write('yes')
-	# 					vote_list.append(p)
-	# 				else:
-	# 					p.raft_wait.write('no')
-	# 			else:
-	# 				old_term = self.term
-	# 				self.handle_request(p, toks)
-	# 				if self.term > old_term:
-	# 					# split brain & new leader elected. 
-	# 					# clean data to install snapshot in case of async mode
-	# 					self.index = 0
-	# 					return
-
-	# 	if self.last_append_entry_ts > 0 and int(time.time()) - self.last_append_entry_ts > self.CONF_PING_TIMEOUT:
-	# 		self.on_candidate()
-	# 		self.state = 'c'
-
 
 	def do_candidate(self):
 		if len(self.get_peers()) > 0:
@@ -675,37 +637,6 @@ class RaftNode(object):
 					list_voted[i][0].raft_wait.write('no')
 			self.term = max_term
 	
-		# for p in peers:
-		# 	msg_list = p.raft_wait.read_all()
-		# 	if msg_list == None or msg_list == []:
-		# 		continue
-
-		# 	for toks in msg_list:
-		# 		if isinstance(toks, str):
-		# 			toks = toks.split()
-
-		# 		if toks[0] == 'vote':
-		# 			term = intcast(toks[1].strip())
-		# 			if term == None:
-		# 				self.log_error('invalid vote: %s' % toks)
-		# 				continue
-
-		# 			if not voted and term >= self.term:
-		# 				#p.raft_wait.write('yes')
-		# 				#voted = True
-		# 				list_voted.append([p,term,int(toks[2])])
-		# 				self.term = term
-		# 			else:
-		# 				if term >= self.term:
-		# 					self.term = term
-							
-		# 				p.raft_wait.write('no')
-		# 		else:
-		# 			if self.handle_request(p, toks):
-		# 				return # elected
-
-
-
   
   
 		if voted:
