@@ -491,12 +491,19 @@ class RaftNode(object):
 		if len(sock_peer_map) == 0:
 			return []
 
+		start_time = time.time()
+		
+
 		reads, writes, excepts = select.select(list(sock_peer_map.keys()), [], [], timeout)
 		peers = []
 		for r in reads:
 			peers.append(sock_peer_map[r])
 			
 		return peers
+
+
+
+
 
 	def handle_request(self, p, toks):
 		#self.log_debug('handle req: %s' % str(toks))
@@ -585,7 +592,7 @@ class RaftNode(object):
 		a = random.random()
 		b = random.randint(3,6)
 		self.CONF_PING_TIMEOUT = a+b
-
+		print("나의 follower term: %d", self.term)
 
 		peers = self.select_peer_req(2) # delay in pending vote
 
@@ -612,6 +619,7 @@ class RaftNode(object):
 						#else:
 						#	p.raft_wait.write('no')
 					else:
+						print("여기가 불리니?")
 						old_term = self.term
 						self.handle_request(p, toks)
 						if self.term > old_term:
@@ -642,7 +650,7 @@ class RaftNode(object):
 
 	def do_candidate(self):
 		print("do_candidate 실행됨")
-		print("term 수: %d" % self.term)
+		print("나의 candidate term: %d", self.term)
 		self.term_exist = False
 		if len(self.get_peers()) > 0:
 			connected = 0
@@ -681,6 +689,7 @@ class RaftNode(object):
 						self.term = term
 						self.on_follower()
 						self.state = 'f'
+						list_voted.append([p,term,int(toks[2])])
 						
 					#list_voted.append([p,term,int(toks[2])])
 					
@@ -732,7 +741,7 @@ class RaftNode(object):
 				if nid in get_result:
 					continue
 
-				msg_list = p.raft_req.read_all(i*(CONF_VOTING_TIME/2))
+				msg_list = p.raft_req.read_all(self.CONF_PING_TIMEOUT)
 				if msg_list == None or msg_list == []:
 					continue
 
@@ -754,7 +763,7 @@ class RaftNode(object):
 		if count > (len(self.peers)+1)/2:
 			self.log_info('%s is a leader' % (self.nid))
 			self.set_leader(self)
-			self.term += 10 
+			self.term += 10
 
 
 	def append_entry(self, future):
@@ -808,6 +817,8 @@ class RaftNode(object):
 
 	def do_leader(self):
 		#self.log_info('do_leader')
+		print("나의 leader term: %d", self.term)
+		print("동료 개수 : %d", len(self.peers))
 		for nid, p in self.get_peers().items():
 			self.handle_ack(p)
 
