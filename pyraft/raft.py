@@ -16,7 +16,7 @@ class RaftNode(object):
 	def __init__(self, nid, addr, ensemble={}, peer = False, worker = None, overwrite_peer=False):
 		# raft node & peer common
 		self.nid = nid
-		self.term = 100000
+		self.term = 100
 		self.index = 0
 		self.state = 'l'
 		self.last_append_entry_ts = 1
@@ -25,14 +25,15 @@ class RaftNode(object):
 		self.first_append_entry = False
 		self.last_applied = 0
 		self.commit_index = 0
-		self.CONF_PING_TIMEOUT = 1
 		self.data_recv_sock = None
 		self.data_recv_shutdown = False
 		self.addr = addr
 		self.ip, self.port = addr.split(':', 1)
 		self.port = int(self.port)
 		self.term_exist = False
-
+		# 초기 election timeout은 여기서 설정한다!
+		self.CONF_PING_TIMEOUT = random.random() + random.randint(3,6)
+		self.nnn = 0
 		self.raft_req = resp.resp_io(None)
 		self.raft_wait = resp.resp_io(None)
 
@@ -313,15 +314,19 @@ class RaftNode(object):
 		return ret
 
 	def raft_connect(self):
+		self.nnn = 0
 		for nid, peer in self.get_peers().items():
 			if peer.raft_req.connected():
+				self.nnn = 0
 				continue
 
 			try:
 				sock = socket.socket()
 				sock.connect((peer.ip, peer.port+1))
+				self.nnn += 1
 			except socket.error:
 				sock.close()
+				self.nnn -= 1
 				continue
 
 			peer.raft_req = resp.resp_io(sock)
@@ -481,7 +486,8 @@ class RaftNode(object):
 				peer.state = 'l'
 			else:
 				peer.state = 'f'
-
+    
+    
 	def select_peer_req(self, timeout):
 		sock_peer_map = {}
 		for nid, p in self.get_peers().items():
@@ -491,14 +497,73 @@ class RaftNode(object):
 		if len(sock_peer_map) == 0:
 			return []
 
-		start_time = time.time()
-		
-
 		reads, writes, excepts = select.select(list(sock_peer_map.keys()), [], [], timeout)
 		peers = []
 		for r in reads:
 			peers.append(sock_peer_map[r])
 			
+		return peers
+    
+	# 여기서는 그냥 vote이면 pending을 처리하고 append_entry면 바로 빠져나옴.
+	def select_peer_req1(self, election_timeout):
+		pending_timeout = 1   #### 이 부분을 조정해야함! election timeout!!! 정하는 부분
+		vote_real = False
+		pending_start_time = -1
+		sock_peer_map = {}
+		for nid, p in self.get_peers().items():
+			if p.raft_wait.sock != None:
+				sock_peer_map[p.raft_wait.sock] = p
+
+		if len(sock_peer_map) == 0:
+			return []
+
+		start_time = time.time()
+		peers = []
+		n = 0
+		while True:
+			n+=1
+			#print(n)
+			elapsed = time.time() - start_time
+			# election timeout만큼 기다린다.
+			if elapsed > election_timeout:
+				print("timeout 끝남")
+				break
+			
+			remaining_timeout = max(0,pending_timeout - elapsed)
+			for nid, p in self.get_peers().items():
+				if p.raft_wait.sock != None:
+					sock_peer_map[p.raft_wait.sock] = p
+			if len(sock_peer_map) == 0:
+				return []
+			reads, writes, excepts = select.select(list(sock_peer_map.keys()), [], [], 0.1) # 임의로 0.1 기다리고 받고 pending시간까지 반복함
+			for r in reads:
+				peer = sock_peer_map[r]
+				msg_list = peer.raft_wait.read_all(0.0)
+				if not msg_list:
+					continue
+				
+				for toks in msg_list:
+					if isinstance(toks, str):
+						toks = toks.split()
+
+					if toks[0] == 'vote':
+						pending_start_time = time.time()
+						term = int(toks[1])
+						peers.append(peer)
+						vote_real = True
+					else:
+						if vote_real == False:
+							peers.append(peer)
+							return peers
+
+			# pending timeout만큼 기다린다.
+			if pending_start_time > 0 and time.time() - pending_start_time > pending_timeout:
+				print("pending timeout 끝남")
+				break
+
+
+			
+
 		return peers
 
 
@@ -587,19 +652,28 @@ class RaftNode(object):
 
 
 	def do_follower(self):
+	
+	## 구현 추가사항
+	## follower가 리더가 바뀌는 시점에만 timeout을 변경함. candidate가 되는 순간 timeout을 변경한다.
+	## heart beat의 경우에는 leader가 새로 선출될 때 하트비트 주기를 변경한다. 
+	## 하트비트는 그대로, sensor data들어오면 append entry RPC를 날린다.
+	## candidate가 되는 순간 timeout을 변경한다.
+	## 
+
 		self.log_info('do_follower')
 		vote_list = []
-		a = random.random()
-		b = random.randint(3,6)
-		self.CONF_PING_TIMEOUT = a+b
+		check_if_RPC_received = False
+		# a = random.random()
+		# b = random.randint(3,6)
 		print("나의 follower term: %d", self.term)
 
-		peers = self.select_peer_req(2) # delay in pending vote
-
-		if self.term_exist == False:
+		peers = self.select_peer_req1(0) # election timeout만큼 기다린다. 
+		print("함수콜 끝남")
+		if True:
 			for p in peers:
 				msg_list = p.raft_wait.read_all()
 				if msg_list == None or msg_list == []:
+					print("메세지 안옴")
 					continue
 				
 				for toks in msg_list:
@@ -607,34 +681,40 @@ class RaftNode(object):
 						toks = toks.split()
 
 					if toks[0] == 'vote':
+						print("vote 받음")
 						term = intcast(toks[1].strip())
 						if term == None:
 							self.log_error('invalid vote: %s' % toks)
 							continue
 						#p.raft_wait.write('yes')
 						if term > self.term:
-							self.term_exist = True
+							print("vote 리스트에 넣을것")
+							#self.term_exist = True
 							vote_list.append([p,term,int(toks[2])])
 			
 						#else:
 						#	p.raft_wait.write('no')
 					else:
-						print("여기가 불리니?")
 						old_term = self.term
 						self.handle_request(p, toks)
 						if self.term > old_term:
-							self.term_exist = False
+							#self.term_exist = False
 							# split brain & new leader elected. 
 							# clean data to install snapshot in case of async mode
 							self.index = 0
 							return
-
+							
+			
 		if self.last_append_entry_ts > 0 and int(time.time()) - self.last_append_entry_ts > self.CONF_PING_TIMEOUT:
 			self.on_candidate()
-			self.state = 'c'
+			self.state = 'c'	
+			print("나 candidate로 바뀜")
+			return
+		
 		
 		# 여기서 최소 election timeout 가지는 노드에게 'yes' 전달하고 나머지는 'no'	
 		if len(vote_list) != 0 and self.state == 'f':
+			print("vote_list: ", vote_list)
 			max_term = max([v[1] for v in vote_list])
 			vote_list = [v for v in vote_list if v[1] == max_term]
 			vote_list.sort(key=lambda x: x[2])
@@ -646,12 +726,17 @@ class RaftNode(object):
 					vote_list[i][0].raft_wait.write('no')
 			self.term = max_term
 
+		else:
+			print("나 follower인데 아무것도 안하고 끝나버렸어")
+			return
+
+
 
 
 	def do_candidate(self):
 		print("do_candidate 실행됨")
-		print("나의 candidate term: %d", self.term)
-		self.term_exist = False
+		print("나의 candidate term: ", self.term)
+		#self.term_exist = False
 		if len(self.get_peers()) > 0:
 			connected = 0
 			for nid, p in self.get_peers().items():
@@ -670,7 +755,7 @@ class RaftNode(object):
 		list_voted = []
 		# process vote
 		peers = self.select_peer_req(vote_wait_timeout)
-		print("peers 개수", len(peers))
+		# print("peers 개수", len(peers))
 		for p in peers:
 			msg_list = p.raft_wait.read_all()
 			if msg_list == None or msg_list == []:
@@ -760,7 +845,7 @@ class RaftNode(object):
 
 		# process result
 		self.log_info('get %d. voters: %s' % (count, str(voters)))
-		if count > (len(self.peers)+1)/2:
+		if count > (self.nnn+1)/2:
 			self.log_info('%s is a leader' % (self.nid))
 			self.set_leader(self)
 			self.term += 10
@@ -771,6 +856,7 @@ class RaftNode(object):
 		prev_index = self.log.get_index()
 		prev_term = self.log.get_term()
 
+		# 클라이언트로부터 데이터가 들어올 때
 		if future != None:
 			append_cmd = ['append_entry', self.term, prev_term, prev_index, self.commit_index, ts]
 			append_cmd.append(future.worker_offset)
@@ -818,7 +904,7 @@ class RaftNode(object):
 	def do_leader(self):
 		#self.log_info('do_leader')
 		print("나의 leader term: %d", self.term)
-		print("동료 개수 : %d", len(self.peers))
+		#print("동료 개수 : %d", len(self.peers))
 		for nid, p in self.get_peers().items():
 			self.handle_ack(p)
 
