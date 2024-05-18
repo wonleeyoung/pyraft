@@ -17,7 +17,7 @@ class RaftNode(object):
 		self.nid = nid
 		self.term = 0
 		self.index = 0
-		self.state = 'c'
+		self.state = 'f'
 		self.last_append_entry_ts = 1
 		self.last_delayed_ts = 1
 		self.last_checkpoint = 0
@@ -26,14 +26,14 @@ class RaftNode(object):
 		self.commit_index = 0
 		self.data_recv_shutdown = False
 		## pending 시간 고정값!
-		self.pending_duration = 0.5
+		self.pending_duration = 0.1
 		self.pending_start_time = 0
 		self.first_vote_check = False
 		self.vote_list = []
-	
+		
 
 		## election timeout 값!!
-		self.election_timeout = random.randint(3,6) + random.random()
+		self.election_timeout = random.randint(15,30)/100# + random.random()
 
 		self.addr = addr
 		self.ip, self.port = addr.split(':', 1)
@@ -376,7 +376,7 @@ class RaftNode(object):
 						if self.state == 'l':
 							self.log_info('나는 리더 from sensor: %s' % data)
 							self.leader_and_candidate_send_data(data,self.port_list1)
-						self.confirmed_buffer.append(data)
+							self.confirmed_buffer.append(data)
 
 					
 						self.log_info('received data from sensor: %s' % data)
@@ -401,14 +401,13 @@ class RaftNode(object):
 			while not self.data_recv_shutdown:
 				
 				data, addr = self.udp_recv_sock.recvfrom(1024)
-				if not data:
-					self.log_error('no data received from sensor')
 				
 				if not data:
 					self.log_error('no data received from sensor')
 					break
 				self.log_info("리더로부터 데이터 받음: %s" % data)
 				self.confirmed_buffer.append(data)
+				self.entry_buffer.clear()
     
 		except socket.error as e:
 			self.log_error('failed to bind data socket: %s' % str(e))
@@ -729,6 +728,7 @@ class RaftNode(object):
 		voted = False
 
 		# process vote
+		#peers = self.select_peer_req(vote_wait_timeout)
 		peers = self.select_peer_req(vote_wait_timeout)
 		for p in peers:
 			msg_list = p.raft_wait.read_all()
