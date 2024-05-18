@@ -24,12 +24,13 @@ class RaftNode(object):
 		self.first_append_entry = False
 		self.last_applied = 0
 		self.commit_index = 0
-
+		self.data_recv_shutdown = False
 		## pending 시간 고정값!
 		self.pending_duration = 0.5
 		self.pending_start_time = 0
 		self.first_vote_check = False
 		self.vote_list = []
+	
 
 		## election timeout 값!!
 		self.election_timeout = random.randint(3,6) + random.random()
@@ -37,6 +38,20 @@ class RaftNode(object):
 		self.addr = addr
 		self.ip, self.port = addr.split(':', 1)
 		self.port = int(self.port)
+
+
+		## entry buffer 부분!!
+		self.entry_buffer = []
+		self.confirmed_buffer = []
+		self.udp_send_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+		self.udp_recv_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+		#self.udp_recv_sock.bind((self.ip, self.port+5))
+
+		# 상대 port list 모음집
+		self.port_list = [5065, 5075, 5085, 5095, 5105, 5115, 5125]
+		self.port_list1 = [port for port in self.port_list if port != self.port+5]
+		print("port_list1: ", self.port_list1)
 
 		self.raft_req = resp.resp_io(None)
 		self.raft_wait = resp.resp_io(None)
@@ -238,6 +253,12 @@ class RaftNode(object):
 		self.th_apply = threading.Thread(target=self.apply_loop)
 		self.th_apply.start()
 
+		self.th_data_recv = threading.Thread(target=self.receive_periodic_data)
+		self.th_data_recv.start()
+
+		self.th_confirmed_data = threading.Thread(target=self.confirmed_data_from_leader)
+		self.th_confirmed_data.start()
+
 		for offset in sorted(self.worker_map.keys()):
 			worker = self.worker_map[offset]
 			worker.start(self)
@@ -331,6 +352,82 @@ class RaftNode(object):
 				self.add_node(toks[0], toks[1])
 
 			self.log_info('connect to %s ok' % nid)
+
+
+
+
+
+	def receive_periodic_data(self):
+		try:
+			self.data_recv_sock = socket.socket()
+			self.data_recv_sock.bind((self.ip, self.port+2))
+			self.data_recv_sock.listen(1)
+			self.log_info('listening for data from sensors')
+			while not self.data_recv_shutdown:
+				conn, addr = self.data_recv_sock.accept()
+				with conn:
+					while not self.data_recv_shutdown:
+						data = conn.recv(1024)
+						if not data:
+							self.log_error('no data received from sensor')
+							break
+						self.entry_buffer.append(data)
+
+						if self.state == 'l':
+							self.log_info('나는 리더 from sensor: %s' % data)
+							self.leader_and_candidate_send_data(data,self.port_list1)
+						self.confirmed_buffer.append(data)
+
+					
+						self.log_info('received data from sensor: %s' % data)
+						#self.data['sensor_data'] = data
+    
+		except socket.error as e:
+			self.log_error('failed to bind data socket: %s' % str(e))
+		finally:
+			if self.data_recv_sock:
+				self.data_recv_sock.close()
+				self.data_recv_sock = None
+
+	
+	
+	## port + 4에 데이터가 들어오면 처리하는 함수 (리더 이외에 다른 노드들이 리더로부터 데이터를 받고 처리)
+	def confirmed_data_from_leader(self):
+
+		try:
+
+			self.log_info('소켓생성!')
+			self.udp_recv_sock.bind((self.ip, self.port+5))
+			while not self.data_recv_shutdown:
+				
+				data, addr = self.udp_recv_sock.recvfrom(1024)
+				if not data:
+					self.log_error('no data received from sensor')
+				
+				if not data:
+					self.log_error('no data received from sensor')
+					break
+				self.log_info("리더로부터 데이터 받음: %s" % data)
+				self.confirmed_buffer.append(data)
+    
+		except socket.error as e:
+			self.log_error('failed to bind data socket: %s' % str(e))
+		finally:
+			self.udp_recv_sock.close()
+
+
+	def leader_and_candidate_send_data(self, data,port_list1):
+		if self.state == 'l':
+			for port in port_list1:
+				self.udp_send_sock.sendto(data, (self.ip, port))
+				#self.log_info('리더가 데이터 다른 친구들에게 보냄: %s' % data)
+			
+
+				
+			
+
+
+
 
 
 	def process_raft_accept(self, sock):
@@ -595,7 +692,7 @@ class RaftNode(object):
 				max_term = max([v[1] for v in self.vote_list])
 				vote_list1 = [v for v in self.vote_list if v[1] == max_term]
 				vote_list1.sort(key=lambda x: x[2])
-				self.log_info("어떤 노드가 투표를 받았는지: %s" % vote_list1[0])
+				
 				for i in range(len(vote_list1)):
 					if i == 0:
 						vote_list1[i][0].raft_wait.write('yes')
@@ -603,6 +700,7 @@ class RaftNode(object):
 						vote_list1[i][0].raft_wait.write('no')
 
 				self.vote_list.clear()
+				vote_list1.clear()
 
 		if self.last_append_entry_ts > 0 and int(time.time()) - self.last_append_entry_ts > self.election_timeout:
 			self.on_candidate()
@@ -622,6 +720,7 @@ class RaftNode(object):
 
 		#self.log_info('do_candidate')
 		print("do_candidate")
+		self.election_timeout = random.randint(3,6) + random.random()
 		self.term += 1
 
 		voting_wait = CONF_VOTING_TIME * 0.1
@@ -693,7 +792,6 @@ class RaftNode(object):
 				for toks in msg_list:
 					if isinstance(toks, str):
 						toks = toks.split()
-
 					if toks[0] == 'yes':
 						voters.append(nid)
 						count+=1
@@ -705,8 +803,8 @@ class RaftNode(object):
 
 		# process result
 		self.log_info('get %d. voters: %s' % (count, str(voters)))
-		#if count > (len(self.peers)+1)/2:
-		if count > 2:
+		if count > (len(self.peers)+1)/2:
+		#if count > 2:
 			self.log_info('%s is a leader' % (self.nid))
 			self.set_leader(self)
 			self.term += 10 
@@ -785,7 +883,7 @@ class RaftNode(object):
 				item = self.q_entry.get(True, 2.0)
 		except queue.Empty:
 			item = None
-			self.log_info('queue empty')
+			#self.log_info('queue empty')
 
 		self.append_entry(item)
 
