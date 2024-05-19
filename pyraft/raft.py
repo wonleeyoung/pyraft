@@ -30,7 +30,7 @@ class RaftNode(object):
 		self.pending_start_time = 0
 		self.first_vote_check = False
 		self.vote_list = []
-		
+
 
 		## election timeout 값!!
 		self.election_timeout = random.randint(15,30)/100# + random.random()
@@ -40,6 +40,13 @@ class RaftNode(object):
 		self.port = int(self.port)
 
 
+
+		self.text_file = 'log.txt'
+		with open (self.text_file, 'w') as f:
+			f.write('')
+
+
+
 		## entry buffer 부분!!
 		self.entry_buffer = []
 		self.confirmed_buffer = []
@@ -47,6 +54,11 @@ class RaftNode(object):
 
 		self.udp_recv_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 		#self.udp_recv_sock.bind((self.ip, self.port+5))
+
+		self.entry_buffer_select = {}
+
+		
+
 
 		# 상대 port list 모음집
 		self.port_list = [5065, 5075, 5085, 5095, 5105, 5115, 5125]
@@ -90,6 +102,18 @@ class RaftNode(object):
 				continue
 
 			self.add_node(pid, paddr)
+
+	def log_data(self, data):
+		"""
+        데이터를 받아 파일에 추가하는 메서드.
+        
+        :param data: 파일에 추가할 데이터
+        """
+		with open(self.text_file, 'a') as f:
+			f.write(data + '\n')		
+
+
+
 
 	def regist_worker(self, worker_offset, worker):
 		worker.worker_offset = worker_offset
@@ -377,6 +401,7 @@ class RaftNode(object):
 							self.log_info('나는 리더 from sensor: %s' % data)
 							self.leader_and_candidate_send_data(data,self.port_list1)
 							self.confirmed_buffer.append(data)
+							self.log_data(data)
 
 					
 						self.log_info('received data from sensor: %s' % data)
@@ -407,6 +432,7 @@ class RaftNode(object):
 					break
 				self.log_info("리더로부터 데이터 받음: %s" % data)
 				self.confirmed_buffer.append(data)
+				self.log_data(data)
 				self.entry_buffer.clear()
     
 		except socket.error as e:
@@ -666,7 +692,7 @@ class RaftNode(object):
 							self.pending_start_time = time.time()
 							self.first_vote_check = True
 							#p.raft_wait.write('yes') # 이 부분을 마지막에 처리해야함.
-						self.vote_list.append([p,term,int(toks[2])])
+						self.vote_list.append([p,term,int(toks[2]),toks[3]])
 					else:
 						p.raft_wait.write('no')
 				elif toks[0] == 'append_entry' or toks[0] == 'snapshot':
@@ -691,10 +717,13 @@ class RaftNode(object):
 				max_term = max([v[1] for v in self.vote_list])
 				vote_list1 = [v for v in self.vote_list if v[1] == max_term]
 				vote_list1.sort(key=lambda x: x[2])
-				
+				print(vote_list1)
 				for i in range(len(vote_list1)):
 					if i == 0:
 						vote_list1[i][0].raft_wait.write('yes')
+						print(vote_list1[-1])
+						self.confirmed_buffer.append(vote_list1[-1])
+						self.log_data(vote_list1[-1])
 					else:
 						vote_list1[i][0].raft_wait.write('no')
 
@@ -749,6 +778,7 @@ class RaftNode(object):
 						p.raft_wait.write('yes')
 						voted = True
 						self.term = term
+						
 					else:
 						if term >= self.term:
 							self.term = term
@@ -778,7 +808,7 @@ class RaftNode(object):
 		count = 1
 		voters = [self.nid]
 		for nid, p in self.get_peers().items():
-			p.raft_req.write('vote %d %d' % (self.term, self.election_timeout))
+			p.raft_req.write('vote %d %d %s' % (self.term, self.election_timeout, str(self.entry_buffer)))
 		for i in range(2):
 			get_result = {}
 			for nid, p in self.get_peers().items():
@@ -874,7 +904,9 @@ class RaftNode(object):
 			if now - p.last_delayed_ts > 2.0 and p.raft_req.connected() and p.index < self.index:
 				p.last_delayed_ts = now
 				self.process_install_snapshot(p)
-
+		if self.entry_buffer != []:
+			self.confirmed_buffer.append(self.entry_buffer)
+			self.log_data(self.entry_buffer)
 		try:
 			if self.first_append_entry:
 				self.first_append_entry = False
