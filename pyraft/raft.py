@@ -41,7 +41,7 @@ class RaftNode(object):
 
 
 
-		self.text_file = 'log.txt'
+		self.text_file = 'log.txt' + str(self.port)
 		with open (self.text_file, 'w') as f:
 			f.write('')
 
@@ -109,6 +109,10 @@ class RaftNode(object):
         
         :param data: 파일에 추가할 데이터
         """
+		if type(data) == bytes:
+			data = data.decode()
+		elif type(data) == list:
+			data = str(data)
 		with open(self.text_file, 'a') as f:
 			f.write(data + '\n')		
 
@@ -401,6 +405,7 @@ class RaftNode(object):
 							self.log_info('나는 리더 from sensor: %s' % data)
 							self.leader_and_candidate_send_data(data,self.port_list1)
 							self.confirmed_buffer.append(data)
+							self.entry_buffer.clear()
 							self.log_data(data)
 
 					
