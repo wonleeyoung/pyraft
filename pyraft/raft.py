@@ -26,7 +26,8 @@ class RaftNode(object):
 		self.commit_index = 0
 		self.data_recv_shutdown = False
 		self.heartbeat = 2
-
+		self.old = 0
+		self.new = 0
 		## pending 시간 고정값!
 		self.pending_duration = 0.1
 		self.pending_start_time = 0
@@ -35,7 +36,7 @@ class RaftNode(object):
 
 
 		## election timeout 값!!
-		self.election_timeout = random.randint(150,300)/100# + random.random()
+		self.election_timeout = random.randint(300,600)/100# + random.random()
 
 		self.addr = addr
 		self.ip, self.port = addr.split(':', 1)
@@ -705,6 +706,10 @@ class RaftNode(object):
 				elif toks[0] == 'append_entry' or toks[0] == 'snapshot':
 					old_term = self.term
 					self.log_info("append_entry를 받음")
+					self.new = time.time()
+					print('\n\n\n'+ str(self.new - self.old)+ '\n\n\n')
+					self.old = self.new
+
 					self.handle_request(p, toks)
 					if self.term > old_term:
 						# split brain & new leader elected. 
@@ -728,7 +733,7 @@ class RaftNode(object):
 				for i in range(len(vote_list1)):
 					if i == 0:
 						vote_list1[i][0].raft_wait.write('yes')
-						print(vote_list1[-1])
+						print(vote_list1[i][-1])
 						self.confirmed_buffer.append(vote_list1[-1])
 						self.log_data(vote_list1[0][-1])
 					else:
@@ -755,7 +760,7 @@ class RaftNode(object):
 
 		#self.log_info('do_candidate')
 		print("do_candidate")
-		self.election_timeout = random.randint(150,300)/100 # + random.random()
+		self.election_timeout = random.randint(300,600)/100 # + random.random()
 		self.term += 1
 
 		voting_wait = CONF_VOTING_TIME * 0.1
