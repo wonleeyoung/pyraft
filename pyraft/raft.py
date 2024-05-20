@@ -29,7 +29,7 @@ class RaftNode(object):
 		self.old = 0
 		self.new = 0
 		## pending 시간 고정값!
-		self.pending_duration = 0.8
+		self.pending_duration = 0.5
 		self.pending_start_time = 0
 		self.first_vote_check = False
 		self.vote_list = []
