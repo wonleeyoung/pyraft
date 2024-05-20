@@ -63,7 +63,7 @@ class RaftNode(object):
 		# 실험 편하게 하기 위해 추가한 socket
 
 		self.experiment_udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-		self.udp_send_address = ('115.145.170.199',5401)
+		self.udp_send_address = ()
 
 
 		# 상대 port list 모음집
