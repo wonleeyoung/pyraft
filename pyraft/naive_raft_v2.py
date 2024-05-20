@@ -699,11 +699,7 @@ class RaftNode(object):
 						continue
 						
 					if term > self.term:
-						if self.first_vote_check == False:
-							self.pending_start_time = time.time()
-							self.first_vote_check = True
-							#p.raft_wait.write('yes') # 이 부분을 마지막에 처리해야함.
-						self.vote_list.append([p,term,int(toks[2]),toks[3]])
+						p.raft_wait.write('yes')
 					else:
 						p.raft_wait.write('no')
 				elif toks[0] == 'append_entry' or toks[0] == 'snapshot':
@@ -730,28 +726,7 @@ class RaftNode(object):
 				else:
 					self.log_info('unknown request from %s: %s' % (p.nid, toks))
 		
-		# pending 시간 끝나고 투표 시작
-		if self.first_vote_check == True:
-			if self.pending_start_time != 0 and time.time() - self.pending_start_time > self.pending_duration:
-				self.log_info("투표를 시작합니다.")
-				self.first_vote_check = False
-				self.pending_start_time = 0
-				self.log_info("투표 리스트: %s" % self.vote_list)
-				max_term = max([v[1] for v in self.vote_list])
-				vote_list1 = [v for v in self.vote_list if v[1] == max_term]
-				vote_list1.sort(key=lambda x: x[2])
-				print(vote_list1)
-				for i in range(len(vote_list1)):
-					if i == 0:
-						vote_list1[i][0].raft_wait.write('yes')
-						print(vote_list1[i][-1])
-						self.confirmed_buffer.append(vote_list1[-1])
-						self.log_data(vote_list1[0][-1])
-					else:
-						vote_list1[i][0].raft_wait.write('no')
-
-				self.vote_list.clear()
-				vote_list1.clear()
+		
 
 		if self.last_append_entry_ts > 0 and int(time.time()) - self.last_append_entry_ts > self.election_timeout:
 			self.on_candidate()
