@@ -29,7 +29,7 @@ class RaftNode(object):
 		self.old = 0
 		self.new = 0
 		## pending 시간 고정값!
-		self.pending_duration = 0.1
+		self.pending_duration = 0.5
 		self.pending_start_time = 0
 		self.first_vote_check = False
 		self.vote_list = []
@@ -60,7 +60,10 @@ class RaftNode(object):
 
 		self.entry_buffer_select = {}
 
-		
+		# 실험 편하게 하기 위해 추가한 socket
+
+		self.experiment_udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+		self.udp_send_address = ('115.145.170.199',5401)
 
 
 		# 상대 port list 모음집
@@ -708,7 +711,15 @@ class RaftNode(object):
 					self.log_info("append_entry를 받음")
 					self.new = time.time()
 					print('\n\n\n'+ str(self.new - self.old)+ '\n\n\n')
+					
+					## 실험용으로 추가한 부분
+					try:
+						data_for_experiment = str(self.new-self.old) + '/' + str(self.nid) + '/' + str(self.term)
+						self.experiment_udp_sock.sendto(data_for_experiment.encode(), self.udp_send_address)
+					except Exception as e:
+						self.log_error('실패!')
 					self.old = self.new
+
 
 					self.handle_request(p, toks)
 					if self.term > old_term:
