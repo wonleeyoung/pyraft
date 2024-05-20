@@ -838,7 +838,7 @@ class RaftNode(object):
 				if nid in get_result:
 					continue
 
-				msg_list = p.raft_req.read_all(i*(CONF_VOTING_TIME/2)+ 0.1)
+				msg_list = p.raft_req.read_all(i*(CONF_VOTING_TIME/2))
 				if msg_list == None or msg_list == []:
 					continue
 
