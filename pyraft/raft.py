@@ -640,7 +640,7 @@ class RaftNode(object):
 			index = self.index
 
 		p.raft_wait.write('ack %d' % index)
-		self.last_append_entry_ts = int(time.time())
+		self.last_append_entry_ts = time.time()
 		return True
 
 	def handle_ack(self, p, expect = 0, timeout = 0.0):
@@ -694,6 +694,7 @@ class RaftNode(object):
 				if toks[0] == 'vote':
 					self.log_info("vote를 받음")	
 					term = intcast(toks[1].strip())
+
 					if term == None:
 						self.log_error('invalid vote: %s' % toks)
 						continue
@@ -702,8 +703,9 @@ class RaftNode(object):
 						if self.first_vote_check == False:
 							self.pending_start_time = time.time()
 							self.first_vote_check = True
+							self.last_append_entry_ts = time.time()
 							#p.raft_wait.write('yes') # 이 부분을 마지막에 처리해야함.
-						self.vote_list.append([p,term,int(toks[2]),toks[3]])
+						self.vote_list.append([p,term,float(toks[2]),toks[3]])
 					else:
 						p.raft_wait.write('no')
 				elif toks[0] == 'append_entry' or toks[0] == 'snapshot':
@@ -753,7 +755,7 @@ class RaftNode(object):
 				self.vote_list.clear()
 				vote_list1.clear()
 
-		if self.last_append_entry_ts > 0 and int(time.time()) - self.last_append_entry_ts > self.election_timeout:
+		if self.last_append_entry_ts > 0 and time.time() - self.last_append_entry_ts > self.election_timeout:
 			self.on_candidate()
 			self.state = 'c'
 
@@ -831,7 +833,7 @@ class RaftNode(object):
 		count = 1
 		voters = [self.nid]
 		for nid, p in self.get_peers().items():
-			p.raft_req.write('vote %d %d %s' % (self.term, self.election_timeout, str(self.entry_buffer)))
+			p.raft_req.write('vote %d %f %s' % (self.term, self.election_timeout, str(self.entry_buffer)))
 		for i in range(2):
 			get_result = {}
 			for nid, p in self.get_peers().items():
