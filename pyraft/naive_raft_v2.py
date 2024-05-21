@@ -36,7 +36,7 @@ class RaftNode(object):
 
 
 		## election timeout 값!!
-		self.election_timeout = random.randint(300,600)/100# + random.random()
+		self.election_timeout = random.randint(400,800)/100# + random.random()
 
 		self.candidate_time = 0
 		self.is_it_voting_now = False
@@ -751,7 +751,7 @@ class RaftNode(object):
 
 		#self.log_info('do_candidate')
 		print("do_candidate")
-		self.election_timeout = random.randint(300,600)/100 # + random.random()
+		self.election_timeout = random.randint(400,800)/100 # + random.random()
 		self.term += 1
 
 		voting_wait = CONF_VOTING_TIME * 0.1
