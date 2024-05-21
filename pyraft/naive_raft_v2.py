@@ -707,17 +707,19 @@ class RaftNode(object):
 						p.raft_wait.write('no')
 				elif toks[0] == 'append_entry' or toks[0] == 'snapshot':
 					old_term = self.term
+
 					self.log_info("append_entry를 받음")
-					self.new = time.time()
-					print('\n\n\n'+ str(self.new - self.old)+ '\n\n\n')
+					if self.term <= int(toks[1]):
+						self.new = time.time()
+						print('\n\n\n'+ str(self.new - self.old)+ '\n\n\n')
 					
-					## 실험용으로 추가한 부분
-					try:
-						data_for_experiment = str(self.new-self.old) + '/' + str(self.nid) + '/' + str(self.term)
-						self.experiment_udp_sock.sendto(data_for_experiment.encode(), self.udp_send_address)
-					except Exception as e:
-						self.log_error('실패!')
-					self.old = self.new
+						## 실험용으로 추가한 부분
+						try:
+							data_for_experiment = str(self.new-self.old) + '/' + str(self.nid) + '/' + str(self.term)
+							self.experiment_udp_sock.sendto(data_for_experiment.encode(), self.udp_send_address)
+						except Exception as e:
+							self.log_error('실패!')
+						self.old = self.new
 
 
 					self.handle_request(p, toks)
