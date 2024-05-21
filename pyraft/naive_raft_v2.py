@@ -36,9 +36,10 @@ class RaftNode(object):
 
 
 		## election timeout 값!!
-		self.election_timeout = random.randint(300,420)/100# + random.random()
+		self.election_timeout = random.randint(300,320)/100# + random.random()
 
 		self.candidate_time = 0
+		self.is_it_voting_now = False
 
 		self.addr = addr
 		self.ip, self.port = addr.split(':', 1)
@@ -748,7 +749,7 @@ class RaftNode(object):
 
 		#self.log_info('do_candidate')
 		print("do_candidate")
-		self.election_timeout = random.randint(300,420)/100 # + random.random()
+		self.election_timeout = random.randint(300,320)/100 # + random.random()
 		self.term += 1
 
 		voting_wait = CONF_VOTING_TIME * 0.1
@@ -805,34 +806,44 @@ class RaftNode(object):
 
 		
 		# process vote request
-		self.candidate_time = time.time()
 		count = 1
 		voters = [self.nid]
-		for nid, p in self.get_peers().items():
-			if time.time() - self.candidate_time > voting_wait:
-				break
-			p.raft_req.write('vote %d %d %s' % (self.term, self.election_timeout, str(self.entry_buffer)))
-		for i in range(2):
-			get_result = {}
+		if self.is_it_voting_now == False:
 			for nid, p in self.get_peers().items():
-				if nid in get_result:
-					continue
+				p.raft_req.write('vote %d %f %s' % (self.term, self.election_timeout, str(self.entry_buffer)))
+				self.is_it_voting_now = True
+				self.candidate_time = time.time()
+	
 
-				msg_list = p.raft_req.read_all(i*(self.election_timeout/2))
-				if msg_list == None or msg_list == []:
-					continue
+		if time.time() - self.candidate_time < self.election_timeout:
+			for i in range(2):
+				get_result = {}
+				for nid, p in self.get_peers().items():
+					if nid in get_result:
+						continue
 
-				for toks in msg_list:
-					if isinstance(toks, str):
-						toks = toks.split()
-					if toks[0] == 'yes':
-						voters.append(nid)
-						count+=1
-						get_result[nid] = True
-					elif toks[0] == 'no':
-						get_result[nid] = False
-					else:
-						self.handle_request(p, toks)
+					msg_list = p.raft_req.read_all(i*(self.election_timeout/2))  #혹시 모르니깐 나중에 변경
+					if msg_list == None or msg_list == []:
+						continue
+
+					for toks in msg_list:
+						if isinstance(toks, str):
+							toks = toks.split()
+						if toks[0] == 'yes':
+							voters.append(nid)
+							count+=1
+							get_result[nid] = True
+						elif toks[0] == 'no':
+							get_result[nid] = False
+						else:
+							self.handle_request(p, toks)
+
+
+		else:
+			self.is_it_voting_now = False
+			self.candidate_time = 0
+			return
+
 
 		# process result
 		self.log_info('get %d. voters: %s' % (count, str(voters)))
@@ -841,6 +852,8 @@ class RaftNode(object):
 			self.log_info('%s is a leader' % (self.nid))
 			self.set_leader(self)
 			self.term += 10 
+			self.is_it_voting_now = False
+			self.candidate_time = 0
 
 
 	def append_entry(self, future):
