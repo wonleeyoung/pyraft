@@ -36,7 +36,9 @@ class RaftNode(object):
 
 
 		## election timeout 값!!
-		self.election_timeout = random.randint(300,450)/100# + random.random()
+		self.election_timeout = random.randint(300,420)/100# + random.random()
+
+		self.candidate_time = 0
 
 		self.addr = addr
 		self.ip, self.port = addr.split(':', 1)
@@ -746,7 +748,7 @@ class RaftNode(object):
 
 		#self.log_info('do_candidate')
 		print("do_candidate")
-		self.election_timeout = random.randint(300,600)/100 # + random.random()
+		self.election_timeout = random.randint(300,420)/100 # + random.random()
 		self.term += 1
 
 		voting_wait = CONF_VOTING_TIME * 0.1
@@ -803,9 +805,12 @@ class RaftNode(object):
 
 		
 		# process vote request
+		self.candidate_time = time.time()
 		count = 1
 		voters = [self.nid]
 		for nid, p in self.get_peers().items():
+			if time.time() - self.candidate_time > voting_wait:
+				break
 			p.raft_req.write('vote %d %d %s' % (self.term, self.election_timeout, str(self.entry_buffer)))
 		for i in range(2):
 			get_result = {}
