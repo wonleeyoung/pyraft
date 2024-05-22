@@ -3,7 +3,7 @@ import time
 import threading
 
 class DataSenderClient:
-    def __init__(self, server_ip, server_ports, interval=0.5, server_ipports=[]):
+    def __init__(self, server_ip, server_ports, interval=1.0, server_ipports=[]):
         self.server_ip = server_ip
         self.server_ports = server_ports
         self.interval = interval
@@ -49,7 +49,7 @@ class DataSenderClient:
 if __name__ == "__main__":
     server_ip = "127.0.0.1"  # Replace with the actual IP of the RaftNode server
     server_ports = [5062, 5072, 5082, 5092, 5102]  # Replace with the actual ports where the RaftNode is listening for data
-    interval = 0.5  # Interval in seconds
+    interval = 1  # Interval in seconds
     server_ipports = [['192.168.1.105',5102],['192.168.1.101',5062],['192.168.1.102',5072],['192.168.1.103',5080],['192.168.1.104',5092]]
 
     client = DataSenderClient(server_ip, server_ports, interval, server_ipports)
