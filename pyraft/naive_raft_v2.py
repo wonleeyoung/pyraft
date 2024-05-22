@@ -36,7 +36,7 @@ class RaftNode(object):
 
 
 		## election timeout 값!!
-		self.election_timeout = random.randint(400,800)/100# + random.random()
+		self.election_timeout = random.randint(300,450)/100# + random.random()
 
 		self.candidate_time = 0
 		self.is_it_voting_now = False
@@ -45,9 +45,10 @@ class RaftNode(object):
 		self.ip, self.port = addr.split(':', 1)
 		self.port = int(self.port)
 
+		self.confirmed = []
 
 
-		self.text_file = 'log' + str(self.port) + '.txt'
+		self.text_file = 'naive_log' + str(self.port) + '.txt'
 		with open (self.text_file, 'w') as f:
 			f.write('')
 
@@ -70,9 +71,9 @@ class RaftNode(object):
 
 
 		# 상대 port list 모음집
-		self.port_list = [5065, 5075, 5085, 5095, 5105, 5115, 5125]
-		self.port_list1 = [port for port in self.port_list if port != self.port+5]
-		print("port_list1: ", self.port_list1)
+		
+		self.ipports = [['192.168.1.105',5105],['192.168.1.101',5065],['192.168.1.102',5075],['192.168.1.103',5085],['192.168.1.104',5095]]
+		self.port_list1 = [[ip, port] for ip, port in self.ipports if port != self.port+5]
 
 		self.raft_req = resp.resp_io(None)
 		self.raft_wait = resp.resp_io(None)
@@ -408,16 +409,13 @@ class RaftNode(object):
 						if not data:
 							self.log_error('no data received from sensor')
 							break
-						self.entry_buffer.append(data)
+						#self.entry_buffer.append(data)
 
 						if self.state == 'l':
 							self.log_info('나는 리더 from sensor: %s' % data)
 							self.leader_and_candidate_send_data(data,self.port_list1)
 							self.confirmed_buffer.append(data)
-							self.entry_buffer.clear()
 							self.log_data(data)
-
-					
 						self.log_info('received data from sensor: %s' % data)
 						#self.data['sensor_data'] = data
     
@@ -447,7 +445,7 @@ class RaftNode(object):
 				self.log_info("리더로부터 데이터 받음: %s" % data)
 				self.confirmed_buffer.append(data)
 				self.log_data(data)
-				self.entry_buffer.clear()
+				
     
 		except socket.error as e:
 			self.log_error('failed to bind data socket: %s' % str(e))
@@ -457,10 +455,10 @@ class RaftNode(object):
 
 	def leader_and_candidate_send_data(self, data,port_list1):
 		if self.state == 'l':
-			for port in port_list1:
-				self.udp_send_sock.sendto(data, (self.ip, port))
+			for ip, port in port_list1:
+				self.udp_send_sock.sendto(data, (ip, port))
 				#self.log_info('리더가 데이터 다른 친구들에게 보냄: %s' % data)
-			
+
 
 				
 			
