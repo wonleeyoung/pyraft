@@ -44,7 +44,7 @@ class RaftNode(object):
 
 
 
-		self.text_file = 'log' + str(self.port) + '.txt'
+		self.text_file = 'log' + str(self.port) + 'newnew.txt'
 		with open (self.text_file, 'w') as f:
 			f.write('')
 
