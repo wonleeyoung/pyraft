@@ -69,7 +69,7 @@ class RaftNode(object):
 		# 상대 port list 모음집
 		self.port_list = [5065, 5075, 5085, 5095, 5105, 5115, 5125]
 		self.ip_list = ['192.168.1.105','192.168.1.101','192.168.1.102','192.168.1.103''192.168.1.104']
-		self.ipports = [['192.168.1.105',5102],['192.168.1.101',5062],['192.168.1.102',5072],['192.168.1.103',5080],['192.168.1.104',5092]]
+		self.ipports = [['192.168.1.105',5105],['192.168.1.101',5065],['192.168.1.102',5075],['192.168.1.103',5085],['192.168.1.104',5095]]
 		#self.ip_list1 = [ip for ip in self.ip_list if ip != self.ip]
 		self.port_list1 = [[ip, port] for ip, port in self.ipports if port != self.port+5]
 		print("port_list1: ", self.port_list1)
