@@ -68,7 +68,10 @@ class RaftNode(object):
 
 		# 상대 port list 모음집
 		self.port_list = [5065, 5075, 5085, 5095, 5105, 5115, 5125]
-		self.port_list1 = [port for port in self.port_list if port != self.port+5]
+		self.ip_list = ['192.168.1.105','192.168.1.101','192.168.1.102','192.168.1.103''192.168.1.104']
+		self.ipports = [['192.168.1.105',5102],['192.168.1.101',5062],['192.168.1.102',5072],['192.168.1.103',5080],['192.168.1.104',5092]]
+		#self.ip_list1 = [ip for ip in self.ip_list if ip != self.ip]
+		self.port_list1 = [[ip, port] for ip, port in self.ipports if port != self.port+5]
 		print("port_list1: ", self.port_list1)
 
 		self.raft_req = resp.resp_io(None)
@@ -121,6 +124,7 @@ class RaftNode(object):
 			data = str(data)
 		with open(self.text_file, 'a') as f:
 			f.write(data + '\n')		
+			f.flush()
 
 
 
@@ -454,9 +458,9 @@ class RaftNode(object):
 
 	def leader_and_candidate_send_data(self, data,port_list1):
 		if self.state == 'l':
-			for port in port_list1:
-				self.udp_send_sock.sendto(data, (self.ip, port))
-				#self.log_info('리더가 데이터 다른 친구들에게 보냄: %s' % data)
+			for ip, port in port_list1:
+				self.udp_send_sock.sendto(data, (ip, port))
+				self.log_info('리더가 데이터 다른 친구들에게 보냄: %s' % data)
 			
 
 				
