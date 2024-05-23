@@ -922,7 +922,7 @@ class RaftNode(object):
 				self.process_install_snapshot(p)
 		if self.entry_buffer != []:
 			self.confirmed_buffer.append(self.entry_buffer)
-			self.log_data(self.entry_buffer)
+			#self.log_data(self.entry_buffer)
 		try:
 			if self.first_append_entry:
 				self.first_append_entry = False
